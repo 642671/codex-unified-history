@@ -39,6 +39,23 @@ wc -l ~/.codex/session_index.jsonl
 sqlite3 ~/.codex/state_5.sqlite "select count(*) from threads where archived=0;"
 ```
 
+## Check context usage in the sidebar index
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+rows = [
+    json.loads(line)
+    for line in Path.home().joinpath(".codex/session_index.jsonl").read_text(encoding="utf-8").splitlines()
+]
+for row in rows[-10:]:
+    print(row.get("thread_name", "").replace("\n", " ")[:180])
+    print("  context_usage =", row.get("context_usage"))
+PY
+```
+
 ## Check LaunchAgent
 
 ```bash
@@ -51,4 +68,3 @@ launchctl print gui/$(id -u)/com.local.codex-unified-history
 ```bash
 tail -20 ~/.codex/unified-history/unified-history.log
 ```
-

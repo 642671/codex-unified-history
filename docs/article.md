@@ -34,7 +34,8 @@ Codex 本地历史主要涉及几类文件：
 6. 更新 JSONL 中 `session_meta.model_provider`。
 7. 从 JSONL 真实时间修复数据库时间。
 8. 写回 JSONL 后恢复文件 mtime，避免左侧排序被污染。
-9. 重建 `session_index.jsonl`。
+9. 从 JSONL 的 `token_count` 事件提取最近一次上下文使用量。
+10. 重建 `session_index.jsonl`，并在历史标题后追加 `ctx used/window (%) · model`。
 
 ## 为什么不能把自定义 provider 叫 openai
 
@@ -65,6 +66,25 @@ base_url = "https://example.com"
 Codex 在重建或展示历史时，可能会参考文件修改时间。如果脚本批量修改旧 JSONL，却不恢复 mtime，旧对话会被误认为刚刚更新，左侧排序就会乱。
 
 所以脚本会先读取 JSONL 内部 timestamp，写回 provider 后再把文件 mtime 调回真实更新时间。
+
+## 为什么要显示上下文使用量
+
+只恢复历史是否可见还不够。长对话真正影响继续使用的是上下文占用情况。
+
+脚本会读取 JSONL 中最新的 `event_msg -> token_count`：
+
+```text
+last_token_usage.total_tokens
+model_context_window
+```
+
+然后在 `session_index.jsonl` 的 `thread_name` 后追加类似下面的后缀：
+
+```text
+ctx 163.8k/258.4k (63%) · gpt-5.5
+```
+
+注意：这里使用的是 `last_token_usage`，不是 `total_token_usage`。后者是整条对话累计 token，会随着多轮对话不断累加，不适合表示当前上下文占用。
 
 ## 自动同步
 
@@ -101,4 +121,3 @@ Codex 在重建或展示历史时，可能会参考文件修改时间。如果�
 ## 结论
 
 核心思路很简单：不要复制历史，不要映射出第二份历史，而是让本地历史始终归属当前 provider，并保持索引、数据库、JSONL 和文件时间一致。
-

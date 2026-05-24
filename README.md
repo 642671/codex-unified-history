@@ -16,6 +16,7 @@ Codex Desktop 的本地历史会记录 `model_provider`。当你在 ChatGPT 登�
 - 不复制对话制造重复历史。
 - 不把自定义 provider 命名为内置保留 ID `openai`。
 - 同步 `.jsonl` 时保留真实 mtime，避免旧对话被错误排到最新。
+- 在左侧历史标题中追加上下文使用量，例如 `ctx 163.8k/258.4k (63%) · gpt-5.5`。
 - 所有操作都在本地完成。
 - 任何清理动作都应先备份。
 
@@ -71,6 +72,8 @@ LaunchAgent 会写入：
 ```bash
 tail -20 ~/.codex/unified-history/unified-history.log
 ```
+
+同步后，`session_index.jsonl` 会为每条历史写入 `context_usage`，并在 `thread_name` 后追加简短上下文用量。脚本优先读取 JSONL 中最新的 `token_count.last_token_usage` 和 `model_context_window`，没有这类事件时再退回到数据库的 `tokens_used`。
 
 ## 校验
 

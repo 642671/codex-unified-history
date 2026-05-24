@@ -75,25 +75,101 @@ def find_duplicates(conn):
     return report, remove_rows
 
 
+def format_token_count(value):
+    try:
+        value = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}k"
+    return str(value)
+
+
+def read_latest_context_usage(path):
+    latest = None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if item.get("type") != "event_msg":
+                    continue
+                payload = item.get("payload")
+                if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                    continue
+                info = payload.get("info")
+                if isinstance(info, dict):
+                    latest = info
+    except (FileNotFoundError, UnicodeDecodeError):
+        return None
+    return latest
+
+
+def context_suffix(row):
+    path = Path(row["rollout_path"] or "")
+    info = read_latest_context_usage(path) if path.exists() else None
+    parts = []
+    if isinstance(info, dict):
+        usage = info.get("last_token_usage") or info.get("total_token_usage")
+        used = usage.get("total_tokens") if isinstance(usage, dict) else None
+        window = info.get("model_context_window")
+        used_text = format_token_count(used)
+        window_text = format_token_count(window)
+        if used_text and window_text:
+            try:
+                percent = int(round((int(used) / int(window)) * 100))
+                parts.append(f"ctx {used_text}/{window_text} ({percent}%)")
+            except (TypeError, ValueError, ZeroDivisionError):
+                parts.append(f"ctx {used_text}/{window_text}")
+        elif used_text:
+            parts.append(f"ctx {used_text}")
+    if not parts:
+        tokens_text = format_token_count(row["tokens_used"])
+        if tokens_text:
+            parts.append(f"tokens {tokens_text}")
+    if row["model"]:
+        parts.append(row["model"])
+    return " · ".join(parts)
+
+
 def rebuild_session_index(conn):
+    conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
         SELECT id,
                COALESCE(NULLIF(title, ''), NULLIF(first_user_message, ''), id) AS thread_name,
-               COALESCE(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) AS updated_ms
+               COALESCE(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) AS updated_ms,
+               rollout_path,
+               tokens_used,
+               model,
+               reasoning_effort
         FROM threads
         WHERE archived = 0
         ORDER BY updated_ms ASC, id ASC
         """
     ).fetchall()
     with INDEX_PATH.open("w", encoding="utf-8") as f:
-        for tid, name, updated_ms in rows:
+        for row in rows:
+            tid, name, updated_ms = row["id"], row["thread_name"], row["updated_ms"]
+            suffix = context_suffix(row)
+            display_name = f"{name} · {suffix}" if suffix else name
             updated_at = datetime.fromtimestamp(
                 int(updated_ms or 0) / 1000, timezone.utc
             ).isoformat().replace("+00:00", "Z")
             f.write(
                 json.dumps(
-                    {"id": tid, "thread_name": name, "updated_at": updated_at},
+                    {
+                        "id": tid,
+                        "thread_name": display_name,
+                        "updated_at": updated_at,
+                        "context_usage": suffix,
+                    },
                     ensure_ascii=False,
                     separators=(",", ":"),
                 )
@@ -210,4 +286,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
